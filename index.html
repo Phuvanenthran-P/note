@@ -1,0 +1,212 @@
+<!--
+File 1: index.html
+Place this file at your web root.
+
+File 2: sw.js
+Place this file at the web root alongside index.html (same origin/path).
+
+Requirements:
+- Serve over HTTPS (localhost with https or plain localhost for testing in Chrome is allowed).
+- Best on Android Chrome. iOS Safari may not support web notifications / push.
+-->
+
+<!-- ===== index.html ===== -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Pinned Notes — Web App</title>
+  <meta name="theme-color" content="#0b7285" />
+  <style>
+    :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,'Helvetica Neue',Arial}
+    body{max-width:720px;margin:18px auto;padding:12px}
+    header{display:flex;align-items:center;gap:12px}
+    input,textarea{width:100%;padding:8px;border:1px solid #ddd;border-radius:6px}
+    button{padding:8px 12px;border-radius:8px;border:none;background:#0b7285;color:#fff}
+    .note{border:1px solid #e6f0f2;padding:10px;border-radius:8px;margin:8px 0}
+    .note footer{display:flex;gap:8px;margin-top:8px}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Pinned Notes</h1>
+    <small style="margin-left:auto">Progressive Web App — mobile-friendly</small>
+  </header>
+
+  <section>
+    <label for="title">Title</label>
+    <input id="title" placeholder="Note title (optional)" />
+    <label for="body">Note</label>
+    <textarea id="body" rows="4" placeholder="Write your note here..."></textarea>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button id="save">Save & Pin to Notifications</button>
+      <button id="clearLocal">Clear All Notes</button>
+    </div>
+  </section>
+
+  <hr />
+  <h3>Your Notes</h3>
+  <div id="notes"></div>
+
+  <script>
+    // Simple local note storage using localStorage (replace with IndexedDB for large scale)
+    const NOTES_KEY = 'pinned_notes_v1';
+
+    function loadNotes(){
+      const raw = localStorage.getItem(NOTES_KEY);
+      return raw ? JSON.parse(raw) : [];
+    }
+    function saveNotes(notes){
+      localStorage.setItem(NOTES_KEY, JSON.stringify(notes));
+    }
+    function renderNotes(){
+      const notes = loadNotes();
+      const container = document.getElementById('notes');
+      container.innerHTML = '';
+      if(notes.length === 0) container.innerHTML = '<p>No notes yet.</p>';
+      notes.slice().reverse().forEach(note => {
+        const el = document.createElement('div'); el.className='note';
+        el.innerHTML = `<strong>${escapeHtml(note.title||'Untitled')}</strong>
+                        <div>${escapeHtml(note.body)}</div>
+                        <footer>
+                          <small>ID: ${note.id}</small>
+                          <div style="margin-left:auto">
+                            <button data-action="open" data-id="${note.id}">Open</button>
+                            <button data-action="remove" data-id="${note.id}">Remove</button>
+                          </div>
+                        </footer>`;
+        container.appendChild(el);
+      });
+    }
+
+    function escapeHtml(s){
+      return String(s)
+        .replaceAll('&','&amp;')
+        .replaceAll('<','&lt;')
+        .replaceAll('>','&gt;')
+        .replaceAll('\"','&quot;');
+    }
+
+    // Register service worker
+    if('serviceWorker' in navigator){
+      navigator.serviceWorker.register('sw.js').then(reg=>{
+        console.log('SW registered', reg);
+      }).catch(err=>console.error('SW reg failed', err));
+    } else {
+      console.warn('Service Worker not supported in this browser. Notifications will be limited.');
+    }
+
+    // Request Notification permission (call when user interacts)
+    async function ensureNotificationPermission(){
+      if(!('Notification' in window)){
+        alert('This browser does not support Notifications. Use Chrome on Android for best experience.');
+        return false;
+      }
+      if(Notification.permission === 'granted') return true;
+      if(Notification.permission === 'denied'){
+        alert('You have blocked notifications. Enable them in browser/site settings.');
+        return false;
+      }
+      const res = await Notification.requestPermission();
+      return res === 'granted';
+    }
+
+    // Show a notification via service worker registration (keeps working when PWA is backgrounded)
+    async function showPinnedNotification(note){
+      const granted = await ensureNotificationPermission();
+      if(!granted) return;
+
+      const reg = await navigator.serviceWorker.getRegistration();
+      if(!reg){
+        // fallback to in-page Notification (less persistent)
+        new Notification(note.title || 'Pinned Note', {
+          body: note.body,
+          tag: note.id,
+          requireInteraction: true
+        });
+        return;
+      }
+
+      // Show persistent notification. requireInteraction keeps it until user dismisses
+      reg.showNotification(note.title || 'Pinned Note', {
+        body: note.body,
+        tag: note.id,                // use tag to identify and replace/close
+        requireInteraction: true,   // keeps notification until user interacts
+        data: {noteId: note.id},
+        actions: [
+          {action: 'remove', title: 'Remove from app'}
+        ]
+      });
+    }
+
+    // Add note and show pinned notification
+    document.getElementById('save').addEventListener('click', async ()=>{
+      const title = document.getElementById('title').value.trim();
+      const body = document.getElementById('body').value.trim();
+      if(!body){ alert('Please enter a note.'); return; }
+      const id = 'n-' + Date.now();
+      const note = {id, title, body, created: new Date().toISOString()};
+      const notes = loadNotes(); notes.push(note); saveNotes(notes); renderNotes();
+      // show notification
+      await showPinnedNotification(note);
+      // clear form
+      document.getElementById('title').value = '';
+      document.getElementById('body').value = '';
+    });
+
+    // Clear all
+    document.getElementById('clearLocal').addEventListener('click', ()=>{
+      if(confirm('Clear ALL notes locally?')){
+        localStorage.removeItem(NOTES_KEY); renderNotes();
+        // Also close all notifications created by this service worker
+        if(navigator.serviceWorker && navigator.serviceWorker.getRegistration){
+          navigator.serviceWorker.getRegistration().then(reg=>{
+            if(!reg) return;
+            reg.getNotifications({}).then(notes=>{
+              notes.forEach(n=>n.close());
+            });
+          });
+        }
+      }
+    });
+
+    // Handle note actions (open / remove)
+    document.getElementById('notes').addEventListener('click', async (e)=>{
+      const btn = e.target.closest('button'); if(!btn) return;
+      const action = btn.dataset.action; const id = btn.dataset.id;
+      if(action === 'open'){
+        const notes = loadNotes(); const note = notes.find(n=>n.id===id);
+        if(note){ alert(note.title + '\n\n' + note.body); }
+      } else if(action === 'remove'){
+        if(!confirm('Remove this note from app (and close pinned notification)?')) return;
+        let notes = loadNotes(); notes = notes.filter(n=>n.id !== id); saveNotes(notes); renderNotes();
+        // Attempt to close notification with matching tag
+        if(navigator.serviceWorker && navigator.serviceWorker.getRegistration){
+          const reg = await navigator.serviceWorker.getRegistration();
+          if(reg){
+            const notifs = await reg.getNotifications({tag: id});
+            notifs.forEach(n=>n.close());
+          }
+        }
+      }
+    });
+
+    // Listen for messages from SW (for example SW telling us a notification action removed a note)
+    if(navigator.serviceWorker){
+      navigator.serviceWorker.addEventListener('message', event => {
+        const d = event.data || {};
+        if(d.type === 'removeNote'){
+          let notes = loadNotes(); notes = notes.filter(n=>n.id !== d.id); saveNotes(notes); renderNotes();
+        }
+      });
+    }
+
+    // initial render
+    renderNotes();
+  </script>
+
+</body>
+</html>
+
+
