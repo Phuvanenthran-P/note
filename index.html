@@ -1,51 +1,67 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Pinned Notes App</title>
-  <link rel="manifest" href="manifest.json" />
-  <style>
-    body { font-family: Arial, sans-serif; padding: 20px; background: #f8f9fa; }
-    h1 { color: #333; }
-    textarea { width: 100%; height: 120px; padding: 10px; }
-    button { margin-top: 10px; padding: 10px 20px; background: #007bff; color: #fff; border: none; cursor: pointer; }
-    button:hover { background: #0056b3; }
-  </style>
-</head>
-<body>
-  <h1>📌 Pinned Notes</h1>
-  <textarea id="noteInput" placeholder="Write your note here..."></textarea><br/>
-  <button id="saveBtn">Save & Pin</button>
+<!doctype html>
+if(reg && reg.showNotification){
+reg.showNotification(note.title||'Pinned note', {body: note.body, tag: 'pinned-note-'+note.id, requireInteraction: true, data:{id:note.id}});
+} else {
+// fallback: Notification from page
+if(Notification.permission==='granted'){
+new Notification(note.title||'Pinned note',{body:note.body,tag:'pinned-note-'+note.id,requireInteraction:true,data:{id:note.id}});
+}
+}
+}catch(e){console.warn(e)}
+}
+}
 
-  <script>
-    // Register Service Worker
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('sw.js');
-    }
 
-    // Request Notification Permission
-    if (Notification.permission !== 'granted') {
-      Notification.requestPermission();
-    }
+async function unpinNotification(note){
+// Ask service worker to close notifications with this tag and clear pinned flag
+if('serviceWorker' in navigator && navigator.serviceWorker.controller){
+navigator.serviceWorker.controller.postMessage({type:'UNPIN_NOTE',id:note.id});
+}
+// Also attempt to close notifications from page
+if('getNotifications' in ServiceWorkerRegistration.prototype){
+const regs = await navigator.serviceWorker.getRegistration();
+if(regs){
+const notifs = await regs.getNotifications({tag:'pinned-note-'+note.id});
+notifs.forEach(n=>n.close());
+}
+}
+// update storage
+note.pinned = false;
+await putNote(note);
+}
 
-    document.getElementById('saveBtn').addEventListener('click', async () => {
-      const note = document.getElementById('noteInput').value.trim();
-      if (!note) return alert("Please write something first.");
 
-      // Send to service worker to show notification
-      const reg = await navigator.serviceWorker.getRegistration();
-      if (reg) {
-        reg.showNotification("📌 Pinned Note", {
-          body: note,
-          requireInteraction: true,  // stays until dismissed
-          icon: "icon.png",
-          badge: "icon.png"
-        });
-      }
+// --- request permission and register SW ---
+async function init(){
+if('serviceWorker' in navigator){
+try{
+const reg = await navigator.serviceWorker.register('/sw.js');
+console.log('sw registered',reg);
+}catch(e){console.warn('sw reg failed',e)}
+}
+if('Notification' in window){
+if(Notification.permission === 'default'){
+try{ await Notification.requestPermission(); }catch(e){}
+}
+}
+await refreshNotes();
+// try to show pinned notes (in case service worker didn't on its own)
+const all = await getAllNotes();
+for(const n of all){ if(n.pinned) sendPinRequestToSW(n); }
+}
+init();
 
-      alert("Note pinned to notifications!");
-    });
-  </script>
+
+// Listen for messages from SW (e.g. when notification clicked or removed)
+navigator.serviceWorker && navigator.serviceWorker.addEventListener('message', async (ev)=>{
+const data = ev.data || {};
+if(data.type === 'NOTIF_CLICK'){ /* could open UI or focus */ }
+if(data.type === 'NOTIF_CLOSED'){ /* could sync state */ }
+// refresh notes in case pin state changed
+await refreshNotes();
+});
+
+
+</script>
 </body>
 </html>
