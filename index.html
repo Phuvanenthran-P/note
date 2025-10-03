@@ -1,212 +1,70 @@
-<!--
-File 1: index.html
-Place this file at your web root.
-
-File 2: sw.js
-Place this file at the web root alongside index.html (same origin/path).
-
-Requirements:
-- Serve over HTTPS (localhost with https or plain localhost for testing in Chrome is allowed).
-- Best on Android Chrome. iOS Safari may not support web notifications / push.
--->
-
-<!-- ===== index.html ===== -->
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Pinned Notes — Web App</title>
+  <title>Pinned Notes</title>
+  <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#0b7285" />
   <style>
-    :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,'Helvetica Neue',Arial}
-    body{max-width:720px;margin:18px auto;padding:12px}
-    header{display:flex;align-items:center;gap:12px}
-    input,textarea{width:100%;padding:8px;border:1px solid #ddd;border-radius:6px}
-    button{padding:8px 12px;border-radius:8px;border:none;background:#0b7285;color:#fff}
-    .note{border:1px solid #e6f0f2;padding:10px;border-radius:8px;margin:8px 0}
-    .note footer{display:flex;gap:8px;margin-top:8px}
+    body{font-family:Arial, sans-serif; max-width:700px; margin:20px auto; padding:15px}
+    input,textarea{width:100%;margin:5px 0;padding:10px;border:1px solid #ccc;border-radius:6px}
+    button{padding:10px 15px;border:none;border-radius:6px;background:#0b7285;color:#fff;margin-top:5px}
+    .note{border:1px solid #ddd;padding:10px;border-radius:8px;margin:10px 0}
   </style>
 </head>
 <body>
-  <header>
-    <h1>Pinned Notes</h1>
-    <small style="margin-left:auto">Progressive Web App — mobile-friendly</small>
-  </header>
+  <h1>Pinned Notes</h1>
 
-  <section>
-    <label for="title">Title</label>
-    <input id="title" placeholder="Note title (optional)" />
-    <label for="body">Note</label>
-    <textarea id="body" rows="4" placeholder="Write your note here..."></textarea>
-    <div style="display:flex;gap:8px;margin-top:8px">
-      <button id="save">Save & Pin to Notifications</button>
-      <button id="clearLocal">Clear All Notes</button>
-    </div>
-  </section>
+  <input id="title" placeholder="Note title" />
+  <textarea id="body" rows="4" placeholder="Write your note..."></textarea>
+  <button id="save">Save & Pin</button>
+  <button id="clear">Clear All</button>
 
-  <hr />
   <h3>Your Notes</h3>
   <div id="notes"></div>
 
-  <script>
-    // Simple local note storage using localStorage (replace with IndexedDB for large scale)
-    const NOTES_KEY = 'pinned_notes_v1';
-
-    function loadNotes(){
-      const raw = localStorage.getItem(NOTES_KEY);
-      return raw ? JSON.parse(raw) : [];
-    }
-    function saveNotes(notes){
-      localStorage.setItem(NOTES_KEY, JSON.stringify(notes));
-    }
-    function renderNotes(){
-      const notes = loadNotes();
-      const container = document.getElementById('notes');
-      container.innerHTML = '';
-      if(notes.length === 0) container.innerHTML = '<p>No notes yet.</p>';
-      notes.slice().reverse().forEach(note => {
-        const el = document.createElement('div'); el.className='note';
-        el.innerHTML = `<strong>${escapeHtml(note.title||'Untitled')}</strong>
-                        <div>${escapeHtml(note.body)}</div>
-                        <footer>
-                          <small>ID: ${note.id}</small>
-                          <div style="margin-left:auto">
-                            <button data-action="open" data-id="${note.id}">Open</button>
-                            <button data-action="remove" data-id="${note.id}">Remove</button>
-                          </div>
-                        </footer>`;
-        container.appendChild(el);
-      });
-    }
-
-    function escapeHtml(s){
-      return String(s)
-        .replaceAll('&','&amp;')
-        .replaceAll('<','&lt;')
-        .replaceAll('>','&gt;')
-        .replaceAll('\"','&quot;');
-    }
-
-    // Register service worker
-    if('serviceWorker' in navigator){
-      navigator.serviceWorker.register('sw.js').then(reg=>{
-        console.log('SW registered', reg);
-      }).catch(err=>console.error('SW reg failed', err));
-    } else {
-      console.warn('Service Worker not supported in this browser. Notifications will be limited.');
-    }
-
-    // Request Notification permission (call when user interacts)
-    async function ensureNotificationPermission(){
-      if(!('Notification' in window)){
-        alert('This browser does not support Notifications. Use Chrome on Android for best experience.');
-        return false;
-      }
-      if(Notification.permission === 'granted') return true;
-      if(Notification.permission === 'denied'){
-        alert('You have blocked notifications. Enable them in browser/site settings.');
-        return false;
-      }
-      const res = await Notification.requestPermission();
-      return res === 'granted';
-    }
-
-    // Show a notification via service worker registration (keeps working when PWA is backgrounded)
-    async function showPinnedNotification(note){
-      const granted = await ensureNotificationPermission();
-      if(!granted) return;
-
-      const reg = await navigator.serviceWorker.getRegistration();
-      if(!reg){
-        // fallback to in-page Notification (less persistent)
-        new Notification(note.title || 'Pinned Note', {
-          body: note.body,
-          tag: note.id,
-          requireInteraction: true
-        });
-        return;
-      }
-
-      // Show persistent notification. requireInteraction keeps it until user dismisses
-      reg.showNotification(note.title || 'Pinned Note', {
-        body: note.body,
-        tag: note.id,                // use tag to identify and replace/close
-        requireInteraction: true,   // keeps notification until user interacts
-        data: {noteId: note.id},
-        actions: [
-          {action: 'remove', title: 'Remove from app'}
-        ]
-      });
-    }
-
-    // Add note and show pinned notification
-    document.getElementById('save').addEventListener('click', async ()=>{
-      const title = document.getElementById('title').value.trim();
-      const body = document.getElementById('body').value.trim();
-      if(!body){ alert('Please enter a note.'); return; }
-      const id = 'n-' + Date.now();
-      const note = {id, title, body, created: new Date().toISOString()};
-      const notes = loadNotes(); notes.push(note); saveNotes(notes); renderNotes();
-      // show notification
-      await showPinnedNotification(note);
-      // clear form
-      document.getElementById('title').value = '';
-      document.getElementById('body').value = '';
-    });
-
-    // Clear all
-    document.getElementById('clearLocal').addEventListener('click', ()=>{
-      if(confirm('Clear ALL notes locally?')){
-        localStorage.removeItem(NOTES_KEY); renderNotes();
-        // Also close all notifications created by this service worker
-        if(navigator.serviceWorker && navigator.serviceWorker.getRegistration){
-          navigator.serviceWorker.getRegistration().then(reg=>{
-            if(!reg) return;
-            reg.getNotifications({}).then(notes=>{
-              notes.forEach(n=>n.close());
-            });
-          });
-        }
-      }
-    });
-
-    // Handle note actions (open / remove)
-    document.getElementById('notes').addEventListener('click', async (e)=>{
-      const btn = e.target.closest('button'); if(!btn) return;
-      const action = btn.dataset.action; const id = btn.dataset.id;
-      if(action === 'open'){
-        const notes = loadNotes(); const note = notes.find(n=>n.id===id);
-        if(note){ alert(note.title + '\n\n' + note.body); }
-      } else if(action === 'remove'){
-        if(!confirm('Remove this note from app (and close pinned notification)?')) return;
-        let notes = loadNotes(); notes = notes.filter(n=>n.id !== id); saveNotes(notes); renderNotes();
-        // Attempt to close notification with matching tag
-        if(navigator.serviceWorker && navigator.serviceWorker.getRegistration){
-          const reg = await navigator.serviceWorker.getRegistration();
-          if(reg){
-            const notifs = await reg.getNotifications({tag: id});
-            notifs.forEach(n=>n.close());
-          }
-        }
-      }
-    });
-
-    // Listen for messages from SW (for example SW telling us a notification action removed a note)
-    if(navigator.serviceWorker){
-      navigator.serviceWorker.addEventListener('message', event => {
-        const d = event.data || {};
-        if(d.type === 'removeNote'){
-          let notes = loadNotes(); notes = notes.filter(n=>n.id !== d.id); saveNotes(notes); renderNotes();
-        }
-      });
-    }
-
-    // initial render
-    renderNotes();
-  </script>
-
+<script>
+const KEY = "notes_v1";
+function load(){return JSON.parse(localStorage.getItem(KEY)||"[]");}
+function save(n){localStorage.setItem(KEY,JSON.stringify(n));}
+function render(){
+  let notes=load(); let c=document.getElementById("notes"); c.innerHTML="";
+  notes.forEach(n=>{
+    let d=document.createElement("div");
+    d.className="note";
+    d.innerHTML=`<b>${n.title||"Untitled"}</b><p>${n.body}</p>
+    <button onclick="removeNote('${n.id}')">Remove</button>`;
+    c.appendChild(d);
+  });
+}
+async function ensurePerm(){
+  if(Notification.permission==="granted") return true;
+  if(Notification.permission==="denied") return false;
+  let res=await Notification.requestPermission(); return res==="granted";
+}
+async function show(note){
+  let ok=await ensurePerm(); if(!ok) return;
+  let reg=await navigator.serviceWorker.ready;
+  reg.showNotification(note.title||"Note",{body:note.body,requireInteraction:true,tag:note.id,data:{id:note.id},actions:[{action:"remove",title:"Remove"}]});
+}
+document.getElementById("save").onclick=async()=>{
+  let t=document.getElementById("title").value, b=document.getElementById("body").value;
+  if(!b){alert("Enter note");return;}
+  let n={id:"n"+Date.now(),title:t,body:b};
+  let notes=load(); notes.push(n); save(notes); render(); show(n);
+  document.getElementById("title").value=""; document.getElementById("body").value="";
+};
+document.getElementById("clear").onclick=()=>{
+  if(confirm("Clear all?")){localStorage.removeItem(KEY);render();}
+};
+window.removeNote=async(id)=>{
+  let notes=load().filter(x=>x.id!==id); save(notes); render();
+  let reg=await navigator.serviceWorker.ready;
+  let notifs=await reg.getNotifications({tag:id}); notifs.forEach(n=>n.close());
+};
+if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js");}
+render();
+</script>
 </body>
 </html>
-
-
