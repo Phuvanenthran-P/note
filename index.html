@@ -1,70 +1,51 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Pinned Notes</title>
-  <link rel="manifest" href="manifest.json">
-  <meta name="theme-color" content="#0b7285" />
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pinned Notes App</title>
+  <link rel="manifest" href="manifest.json" />
   <style>
-    body{font-family:Arial, sans-serif; max-width:700px; margin:20px auto; padding:15px}
-    input,textarea{width:100%;margin:5px 0;padding:10px;border:1px solid #ccc;border-radius:6px}
-    button{padding:10px 15px;border:none;border-radius:6px;background:#0b7285;color:#fff;margin-top:5px}
-    .note{border:1px solid #ddd;padding:10px;border-radius:8px;margin:10px 0}
+    body { font-family: Arial, sans-serif; padding: 20px; background: #f8f9fa; }
+    h1 { color: #333; }
+    textarea { width: 100%; height: 120px; padding: 10px; }
+    button { margin-top: 10px; padding: 10px 20px; background: #007bff; color: #fff; border: none; cursor: pointer; }
+    button:hover { background: #0056b3; }
   </style>
 </head>
 <body>
-  <h1>Pinned Notes</h1>
+  <h1>📌 Pinned Notes</h1>
+  <textarea id="noteInput" placeholder="Write your note here..."></textarea><br/>
+  <button id="saveBtn">Save & Pin</button>
 
-  <input id="title" placeholder="Note title" />
-  <textarea id="body" rows="4" placeholder="Write your note..."></textarea>
-  <button id="save">Save & Pin</button>
-  <button id="clear">Clear All</button>
+  <script>
+    // Register Service Worker
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js');
+    }
 
-  <h3>Your Notes</h3>
-  <div id="notes"></div>
+    // Request Notification Permission
+    if (Notification.permission !== 'granted') {
+      Notification.requestPermission();
+    }
 
-<script>
-const KEY = "notes_v1";
-function load(){return JSON.parse(localStorage.getItem(KEY)||"[]");}
-function save(n){localStorage.setItem(KEY,JSON.stringify(n));}
-function render(){
-  let notes=load(); let c=document.getElementById("notes"); c.innerHTML="";
-  notes.forEach(n=>{
-    let d=document.createElement("div");
-    d.className="note";
-    d.innerHTML=`<b>${n.title||"Untitled"}</b><p>${n.body}</p>
-    <button onclick="removeNote('${n.id}')">Remove</button>`;
-    c.appendChild(d);
-  });
-}
-async function ensurePerm(){
-  if(Notification.permission==="granted") return true;
-  if(Notification.permission==="denied") return false;
-  let res=await Notification.requestPermission(); return res==="granted";
-}
-async function show(note){
-  let ok=await ensurePerm(); if(!ok) return;
-  let reg=await navigator.serviceWorker.ready;
-  reg.showNotification(note.title||"Note",{body:note.body,requireInteraction:true,tag:note.id,data:{id:note.id},actions:[{action:"remove",title:"Remove"}]});
-}
-document.getElementById("save").onclick=async()=>{
-  let t=document.getElementById("title").value, b=document.getElementById("body").value;
-  if(!b){alert("Enter note");return;}
-  let n={id:"n"+Date.now(),title:t,body:b};
-  let notes=load(); notes.push(n); save(notes); render(); show(n);
-  document.getElementById("title").value=""; document.getElementById("body").value="";
-};
-document.getElementById("clear").onclick=()=>{
-  if(confirm("Clear all?")){localStorage.removeItem(KEY);render();}
-};
-window.removeNote=async(id)=>{
-  let notes=load().filter(x=>x.id!==id); save(notes); render();
-  let reg=await navigator.serviceWorker.ready;
-  let notifs=await reg.getNotifications({tag:id}); notifs.forEach(n=>n.close());
-};
-if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js");}
-render();
-</script>
+    document.getElementById('saveBtn').addEventListener('click', async () => {
+      const note = document.getElementById('noteInput').value.trim();
+      if (!note) return alert("Please write something first.");
+
+      // Send to service worker to show notification
+      const reg = await navigator.serviceWorker.getRegistration();
+      if (reg) {
+        reg.showNotification("📌 Pinned Note", {
+          body: note,
+          requireInteraction: true,  // stays until dismissed
+          icon: "icon.png",
+          badge: "icon.png"
+        });
+      }
+
+      alert("Note pinned to notifications!");
+    });
+  </script>
 </body>
 </html>
