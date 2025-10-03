@@ -1,3 +1,4 @@
+<!-- Updated index.html with auto re-pin on app launch -->
 <!doctype html>
 <html lang="en">
 <head>
@@ -6,7 +7,6 @@
   <title>Pinned Notes PWA</title>
   <link rel="manifest" href="/manifest.json">
   <style>
-    /* Minimal Tailwind-like quick styles (so no external deps) */
     :root{--bg:#0f1724;--card:#0b1220;--accent:#06b6d4;--muted:#9aa4b2;--text:#e6eef6}
     html,body{height:100%;margin:0;background:linear-gradient(180deg,#071028 0%,#071032 100%);font-family:Inter,system-ui,Segoe UI,Arial;color:var(--text)}
     .app{max-width:900px;margin:28px auto;padding:20px}
@@ -60,7 +60,7 @@
   </div>
 
 <script>
-// --- small IndexedDB helper (promisified) ---
+// --- IndexedDB helper ---
 function openDB(){
   return new Promise((resolve,reject)=>{
     const req = indexedDB.open('pinned-notes-db',1);
@@ -79,8 +79,7 @@ async function putNote(note){
   const db = await openDB();
   return new Promise((resolve,reject)=>{
     const tx = db.transaction('notes','readwrite');
-    const store = tx.objectStore('notes');
-    store.put(note);
+    tx.objectStore('notes').put(note);
     tx.oncomplete = ()=>resolve(note);
     tx.onerror = ()=>reject(tx.error);
   })
@@ -105,148 +104,62 @@ async function delNote(id){
   })
 }
 
-// --- UI and logic ---
-const noteTitle = document.getElementById('noteTitle');
-const noteBody = document.getElementById('noteBody');
-const saveBtn = document.getElementById('saveBtn');
-const savePinBtn = document.getElementById('savePinBtn');
-const clearBtn = document.getElementById('clearBtn');
-const notesList = document.getElementById('notes');
-const installBtn = document.getElementById('installBtn');
+// --- UI ---
+const noteTitle=document.getElementById('noteTitle');
+const noteBody=document.getElementById('noteBody');
+const saveBtn=document.getElementById('saveBtn');
+const savePinBtn=document.getElementById('savePinBtn');
+const clearBtn=document.getElementById('clearBtn');
+const notesList=document.getElementById('notes');
+const installBtn=document.getElementById('installBtn');
 
-let deferredPrompt = null;
-window.addEventListener('beforeinstallprompt', (e)=>{
-  e.preventDefault();
-  deferredPrompt = e;
-  installBtn.style.display = 'inline-block';
-});
-installBtn.addEventListener('click', async ()=>{
-  if(!deferredPrompt) return;
-  deferredPrompt.prompt();
-  const choice = await deferredPrompt.userChoice;
-  deferredPrompt = null;
-  installBtn.style.display = 'none';
-});
+let deferredPrompt=null;
+window.addEventListener('beforeinstallprompt',(e)=>{e.preventDefault();deferredPrompt=e;installBtn.style.display='inline-block'});
+installBtn.addEventListener('click',async()=>{if(!deferredPrompt)return;deferredPrompt.prompt();await deferredPrompt.userChoice;deferredPrompt=null;installBtn.style.display='none'});
 
 async function refreshNotes(){
-  const arr = await getAllNotes();
-  arr.sort((a,b)=> (b.id-a.id));
+  const arr=await getAllNotes();
+  arr.sort((a,b)=>b.id-a.id);
   notesList.innerHTML='';
   for(const n of arr){
-    const li = document.createElement('li');
-    li.className='note';
-    li.innerHTML = `<div><strong>${escapeHtml(n.title||'Untitled')}</strong><div class="meta">${escapeHtml(n.body.slice(0,120))}</div></div>`;
-    const actions = document.createElement('div');
-    actions.className='note-actions';
-    const pinBtn = document.createElement('button'); pinBtn.className='btn-ghost'; pinBtn.textContent = n.pinned? 'Unpin' : 'Pin';
-    pinBtn.addEventListener('click', ()=> togglePin(n));
-    const openBtn = document.createElement('button'); openBtn.className='btn-ghost'; openBtn.textContent='Open';
-    openBtn.addEventListener('click', ()=>{
-      noteTitle.value = n.title; noteBody.value = n.body;
-    });
-    const del = document.createElement('button'); del.className='btn-ghost'; del.textContent='Delete';
-    del.addEventListener('click', async ()=>{
-      if(n.pinned) await unpinNotification(n);
-      await delNote(n.id);
-      await refreshNotes();
-    });
-    actions.appendChild(pinBtn); actions.appendChild(openBtn); actions.appendChild(del);
-    li.appendChild(actions);
-    notesList.appendChild(li);
+    const li=document.createElement('li');li.className='note';
+    li.innerHTML=`<div><strong>${escapeHtml(n.title||'Untitled')}</strong><div class="meta">${escapeHtml(n.body.slice(0,120))}</div></div>`;
+    const actions=document.createElement('div');actions.className='note-actions';
+    const pinBtn=document.createElement('button');pinBtn.className='btn-ghost';pinBtn.textContent=n.pinned?'Unpin':'Pin';
+    pinBtn.addEventListener('click',()=>togglePin(n));
+    const openBtn=document.createElement('button');openBtn.className='btn-ghost';openBtn.textContent='Open';
+    openBtn.addEventListener('click',()=>{noteTitle.value=n.title;noteBody.value=n.body});
+    const del=document.createElement('button');del.className='btn-ghost';del.textContent='Delete';
+    del.addEventListener('click',async()=>{if(n.pinned)await unpinNotification(n);await delNote(n.id);await refreshNotes()});
+    actions.appendChild(pinBtn);actions.appendChild(openBtn);actions.appendChild(del);
+    li.appendChild(actions);notesList.appendChild(li);
   }
 }
-
 function escapeHtml(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+function makeId(){return Date.now()+Math.floor(Math.random()*1000)}
 
-function makeId(){return Date.now() + Math.floor(Math.random()*1000)}
+saveBtn.addEventListener('click',async()=>{const note={id:makeId(),title:noteTitle.value.trim(),body:noteBody.value,pinned:false};await putNote(note);await refreshNotes();noteTitle.value='';noteBody.value=''});
+savePinBtn.addEventListener('click',async()=>{const note={id:makeId(),title:noteTitle.value.trim(),body:noteBody.value,pinned:true};await putNote(note);await sendPinRequestToSW(note);await refreshNotes();noteTitle.value='';noteBody.value=''});
+clearBtn.addEventListener('click',()=>{noteTitle.value='';noteBody.value=''});
 
-saveBtn.addEventListener('click', async ()=>{
-  const note = {id: makeId(), title: noteTitle.value.trim(), body: noteBody.value, pinned:false};
-  await putNote(note); await refreshNotes();
-  noteTitle.value=''; noteBody.value='';
-});
-savePinBtn.addEventListener('click', async ()=>{
-  const note = {id: makeId(), title: noteTitle.value.trim(), body: noteBody.value, pinned:true};
-  await putNote(note);
-  await sendPinRequestToSW(note);
-  await refreshNotes();
-  noteTitle.value=''; noteBody.value='';
-});
-clearBtn.addEventListener('click', ()=>{ noteTitle.value=''; noteBody.value=''; });
+async function togglePin(n){n.pinned=!n.pinned;await putNote(n);if(n.pinned)await sendPinRequestToSW(n);else await unpinNotification(n);await refreshNotes()}
 
-async function togglePin(n){
-  n.pinned = !n.pinned;
-  await putNote(n);
-  if(n.pinned) await sendPinRequestToSW(n);
-  else await unpinNotification(n);
-  await refreshNotes();
-}
+async function sendPinRequestToSW(note){if('serviceWorker'in navigator&&navigator.serviceWorker.controller){navigator.serviceWorker.controller.postMessage({type:'PIN_NOTE',note})}else{try{const reg=await navigator.serviceWorker.getRegistration();if(reg&&reg.showNotification){reg.showNotification(note.title||'Pinned note',{body:note.body,tag:'pinned-note-'+note.id,requireInteraction:true,data:{id:note.id}})}else{if(Notification.permission==='granted'){new Notification(note.title||'Pinned note',{body:note.body,tag:'pinned-note-'+note.id,requireInteraction:true,data:{id:note.id}})}}}catch(e){console.warn(e)}}}
 
-async function sendPinRequestToSW(note){
-  if('serviceWorker' in navigator && navigator.serviceWorker.controller){
-    navigator.serviceWorker.controller.postMessage({type:'PIN_NOTE',note});
-  } else {
-    // If no service worker controller yet, register and then send — but we'll also show notification from page as fallback
-    try{ const reg = await navigator.serviceWorker.getRegistration();
-      if(reg && reg.showNotification){
-        reg.showNotification(note.title||'Pinned note', {body: note.body, tag: 'pinned-note-'+note.id, requireInteraction: true, data:{id:note.id}});
-      } else {
-        // fallback: Notification from page
-        if(Notification.permission==='granted'){
-          new Notification(note.title||'Pinned note',{body:note.body,tag:'pinned-note-'+note.id,requireInteraction:true,data:{id:note.id}});
-        }
-      }
-    }catch(e){console.warn(e)}
-  }
-}
+async function unpinNotification(note){if('serviceWorker'in navigator&&navigator.serviceWorker.controller){navigator.serviceWorker.controller.postMessage({type:'UNPIN_NOTE',id:note.id})}if('getNotifications'in ServiceWorkerRegistration.prototype){const regs=await navigator.serviceWorker.getRegistration();if(regs){const notifs=await regs.getNotifications({tag:'pinned-note-'+note.id});notifs.forEach(n=>n.close())}}note.pinned=false;await putNote(note)}
 
-async function unpinNotification(note){
-  // Ask service worker to close notifications with this tag and clear pinned flag
-  if('serviceWorker' in navigator && navigator.serviceWorker.controller){
-    navigator.serviceWorker.controller.postMessage({type:'UNPIN_NOTE',id:note.id});
-  }
-  // Also attempt to close notifications from page
-  if('getNotifications' in ServiceWorkerRegistration.prototype){
-    const regs = await navigator.serviceWorker.getRegistration();
-    if(regs){
-      const notifs = await regs.getNotifications({tag:'pinned-note-'+note.id});
-      notifs.forEach(n=>n.close());
-    }
-  }
-  // update storage
-  note.pinned = false;
-  await putNote(note);
-}
-
-// --- request permission and register SW ---
+// --- INIT ---
 async function init(){
-  if('serviceWorker' in navigator){
-    try{
-      const reg = await navigator.serviceWorker.register('/sw.js');
-      console.log('sw registered',reg);
-    }catch(e){console.warn('sw reg failed',e)}
-  }
-  if('Notification' in window){
-    if(Notification.permission === 'default'){
-      try{ await Notification.requestPermission(); }catch(e){}
-    }
-  }
+  if('serviceWorker'in navigator){try{await navigator.serviceWorker.register('/sw.js')}catch(e){console.warn('sw reg failed',e)}}
+  if('Notification'in window&&Notification.permission==='default'){try{await Notification.requestPermission()}catch(e){}}
   await refreshNotes();
-  // try to show pinned notes (in case service worker didn't on its own)
-  const all = await getAllNotes();
-  for(const n of all){ if(n.pinned) sendPinRequestToSW(n); }
+  // Auto re-pin pinned notes at startup
+  const all=await getAllNotes();
+  for(const n of all){if(n.pinned)sendPinRequestToSW(n)}
 }
 init();
 
-// Listen for messages from SW (e.g. when notification clicked or removed)
-navigator.serviceWorker && navigator.serviceWorker.addEventListener('message', async (ev)=>{
-  const data = ev.data || {};
-  if(data.type === 'NOTIF_CLICK'){ /* could open UI or focus */ }
-  if(data.type === 'NOTIF_CLOSED'){ /* could sync state */ }
-  // refresh notes in case pin state changed
-  await refreshNotes();
-});
-
+navigator.serviceWorker&&navigator.serviceWorker.addEventListener('message',async(ev)=>{await refreshNotes()});
 </script>
 </body>
 </html>
